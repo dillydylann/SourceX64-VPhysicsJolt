@@ -23,10 +23,6 @@
 #undef WAS_LINUX
 #endif
 
-#ifndef GAME_SDK2013
-#include "tier0/logging.h"
-#endif
-
 #if defined( GAME_SDK2013 )
 #include "compat/compat_sdk2013.h"
 #elif defined( GAME_ASW )

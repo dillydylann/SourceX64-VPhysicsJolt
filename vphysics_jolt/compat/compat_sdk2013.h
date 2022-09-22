@@ -6,6 +6,13 @@
 
 #include "Color.h"
 
+#ifndef LOGGING_H
+
+#undef Log_Warning
+#undef Log_Msg
+#undef Log_Error
+#undef DEFINE_LOGGING_CHANNEL_NO_TAGS
+
 enum LoggingSeverity_t
 {
     LS_MESSAGE = 0,
@@ -29,14 +36,16 @@ struct LoggingChannelInfo_t
 
 static const int MAX_LOGGING_MESSAGE_LENGTH = 2048;
 
-// TODO
-#define DevAssert( ... )
-#define DevAssertMsg( ... )
-#define AssertMsg_Internal( ... )
 #define InternalMsg( Channel, Fmt, ... ) ConColorMsg( g_LoggingInfo##Channel.color, "[%s]" Fmt, g_LoggingInfo##Channel.pszName, ##__VA_ARGS__ )
 #define Log_Msg( Channel, Fmt, ... ) InternalMsg( Channel, Fmt, ##__VA_ARGS__ )
 #define Log_Warning( Channel, Fmt, ... ) InternalMsg( Channel, Fmt, ##__VA_ARGS__ )
 #define Log_Error( Channel, Fmt, ... ) InternalMsg( Channel, Fmt, ##__VA_ARGS__ )
+
+#endif
+
+#define DevAssert( ... )
+#define DevAssertMsg( ... )
+#define AssertMsg_Internal( ... )
 
 // Unused, just makes stuff cleaner to not have ifdef spam.
 enum collisionhints

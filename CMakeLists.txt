@@ -1,0 +1,5 @@
+add_compile_definitions(GAME_SDK2013)
+
+add_subdirectory(joltphysics)
+add_subdirectory(vphysics_jolt)
+add_subdirectory(vphysics_wrapper)
