@@ -39,6 +39,7 @@ generated_code_*
 *.dll
 *.exe
 *.lib
+.vshistory/
 
 # Linux Stuff
 *.mak

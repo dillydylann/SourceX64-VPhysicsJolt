@@ -1,0 +1,30 @@
+include_directories("${SRCDIR}/vphysics_jolt/joltphysics/src")
+add_compile_definitions(JPH_DISABLE_CUSTOM_ALLOCATOR JPH_DEBUG_RENDERER)
+
+if(JOLT_TYPE STREQUAL "AVX2")
+	add_compile_definitions(JPH_USE_SSE4_1 JPH_USE_SSE4_2 JPH_USE_AVX JPH_USE_AVX2
+							JPH_USE_LZCNT JPH_USE_TZCNT JPH_USE_F16C JPH_USE_FMADD)
+	if(MSVC)
+		add_compile_options(/arch:AVX2)
+	else()
+		add_compile_options(-msse4.1 -msse4.2 -mavx2 -mlzcnt -mf16c -mfma -mbmi)
+	endif()
+elseif(JOLT_TYPE STREQUAL "SSE42")
+	add_compile_definitions(JPH_USE_SSE4_1 JPH_USE_SSE4_2)
+	if(MSVC AND NOT WIN64)
+		# Not needed in 64-bit Windows
+		# https://stackoverflow.com/a/1067819
+		if(NOT WIN64)
+			add_compile_options(/arch:SSE2)
+		endif()
+	else()
+		add_compile_options(-msse4.1 -msse4.2)
+	endif()
+elseif(JOLT_TYPE STREQUAL "SSE2")
+	if(MSVC)
+		# See above comment
+		if(NOT WIN64)
+			add_compile_options(/arch:SSE2)
+		endif()
+	endif()
+endif()
