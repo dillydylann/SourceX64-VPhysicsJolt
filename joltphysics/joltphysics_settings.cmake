@@ -11,7 +11,7 @@ if(JOLT_TYPE STREQUAL "AVX2")
 	endif()
 elseif(JOLT_TYPE STREQUAL "SSE42")
 	add_compile_definitions(JPH_USE_SSE4_1 JPH_USE_SSE4_2)
-	if(MSVC AND NOT WIN64)
+	if(MSVC)
 		# Not needed in 64-bit Windows
 		# https://stackoverflow.com/a/1067819
 		if(NOT WIN64)

@@ -44,7 +44,7 @@ target_sources(${PROJECT_NAME}
 		"vjolt_parse.cpp"
 		"vjolt_querymodel.cpp"
 		"vjolt_surfaceprops.cpp"
-	PUBLIC
+	PRIVATE
 		"${SRCDIR}/public/collisionutils.cpp")
 
 ## Header Files ##
