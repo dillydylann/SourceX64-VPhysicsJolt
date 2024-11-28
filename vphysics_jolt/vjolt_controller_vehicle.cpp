@@ -15,6 +15,13 @@ static ConVar vjolt_vehicle_wheel_debug( "vjolt_vehicle_wheel_debug", "0", FCVAR
 static ConVar vjolt_vehicle_throttle_opposition_limit( "vjolt_vehicle_throttle_opposition_limit", "5", FCVAR_NONE,
 	"Below what speed should we be attempting to drive/climb with handbrake on to avoid falling down." );
 
+static ConVar vjolt_vehicle_disable_handbrakes( "vjolt_vehicle_disable_handbrakes", "0", FCVAR_NONE );
+
+static ConVar vjolt_vehicle_disable_autobrake( "vjolt_vehicle_disable_autobrake", "0", FCVAR_NONE );
+static ConVar vjolt_vehicle_disable_brake( "vjolt_vehicle_disable_brake", "0", FCVAR_NONE );
+
+static ConVar vjolt_vehicle_throttle_override( "vjolt_vehicle_throttle_override", "-1.0", FCVAR_NONE );
+
 //------------------------------------------------------------------------------------------------
 
 static const JPH::Vec3 VehicleUpVector		= JPH::Vec3( 0, 0, 1 );
@@ -248,21 +255,27 @@ void JoltPhysicsVehicleController::OnPreSimulate( float flDeltaTime )
 	if ( m_ControlParams.steering != 0.0f || m_ControlParams.throttle != 0.0f || m_ControlParams.brake != 0.0f || m_ControlParams.handbrake )
 		bodyInterface.ActivateBody( m_pCarBodyObject->GetBodyID() );
 
-	bool bHandbrake = m_ControlParams.handbrake;
+	bool bHandbrake = m_ControlParams.handbrake && !vjolt_vehicle_disable_handbrakes.GetBool();
 
 	// Don't throttle when holding handbrake (like Source)
 	float flThrottle = bHandbrake ? 0.0f : m_ControlParams.throttle;
+
+	if ( vjolt_vehicle_throttle_override.GetFloat() > 0.0f )
+		flThrottle = vjolt_vehicle_throttle_override.GetFloat();
 	
 	// Apply a little brake without throttle to stop the vehicle from coasting (like Source).
 	const bool bCoasting = flThrottle == 0.0f && m_ControlParams.brake == 0.0f && !bHandbrake;
-	const float flBrake = bCoasting ? 0.1f : m_ControlParams.brake;
+	float flBrake = bCoasting && !vjolt_vehicle_disable_autobrake.GetBool() ? 0.1f : m_ControlParams.brake;
+
+	if ( vjolt_vehicle_disable_brake.GetBool() )
+		flBrake = 0.0f;
 
 	const float ThrottleOpositionSpeed = vjolt_vehicle_throttle_opposition_limit.GetFloat();
 
 	// Enable the handbrake when going at low speeds to avoid slipping when going up hill.
 	if ( ( flThrottle < 0.0f && m_OperatingParams.speed > ThrottleOpositionSpeed ) ||
 		( flThrottle > 0.0f && m_OperatingParams.speed < -ThrottleOpositionSpeed ) )
-		bHandbrake = true;
+		bHandbrake = !vjolt_vehicle_disable_handbrakes.GetBool();
 
 	// Are we boosting?
 	float flTotalTorqueMultiplier = 1.0f;
@@ -408,7 +421,10 @@ void JoltPhysicsVehicleController::CreateWheel( JPH::VehicleConstraintSettings &
 
 	JPH::WheelSettingsWV *wheelSettings = new JPH::WheelSettingsWV;
 	wheelSettings->mPosition			= SourceToJolt::Distance( wheelPositionLocal );
-	wheelSettings->mDirection			= JPH::Vec3( 0, 0, -1 );
+	wheelSettings->mSuspensionDirection = JPH::Vec3( 0, 0, -1 );
+	wheelSettings->mSteeringAxis		= JPH::Vec3( 0, 0, 1 );
+	wheelSettings->mWheelUp				= JPH::Vec3( 0, 0, 1 );
+	wheelSettings->mWheelForward		= JPH::Vec3( 0, 1, 0 );
 	wheelSettings->mAngularDamping		= axle.wheels.rotdamping;
 	// TODO(Josh): What about more than 4 wheels?
 	wheelSettings->mMaxSteerAngle		= axleIdx == 0 ? steeringAngle : 0.0f;
@@ -417,17 +433,11 @@ void JoltPhysicsVehicleController::CreateWheel( JPH::VehicleConstraintSettings &
 	wheelSettings->mInertia				= 0.5f * axle.wheels.mass * ( wheelSettings->mRadius * wheelSettings->mRadius );
 	wheelSettings->mSuspensionMinLength = 0;
 	wheelSettings->mSuspensionMaxLength = additionalLength;
-	wheelSettings->mSuspensionDamping	= axle.suspension.springDamping;
-	// Josh:
-	// so to go from K (Spring Constant) -> freq we do
-	// sqrtf( K / Mass ) / ( 2.0f * PI )
-	// but it seems like it already has mass divided in Source so...
-	// sqrtf( K ) / ( 2.0f * PI )
-	wheelSettings->mSuspensionFrequency = sqrtf( axle.suspension.springConstant ) / ( 2.0f * M_PI_F );
-	// Josh: I don't know why but it looks and feels really wrong without this:
-	// TODO(Josh): Investigate more later, doesn't make much sense.
-	// May be related to mass of wheel or something.
-	wheelSettings->mSuspensionFrequency *= M_PI_F;
+	wheelSettings->mSuspensionSpring.mMode = JPH::ESpringMode::StiffnessAndDamping;
+	// Source has these divided by the mass of the vehicle for some reason.
+	// Convert these to a stiffness of k, in N/m...
+	wheelSettings->mSuspensionSpring.mStiffness = axle.suspension.springConstant * m_pCarBodyObject->GetMass();
+	wheelSettings->mSuspensionSpring.mDamping = axle.suspension.springDamping * m_pCarBodyObject->GetMass();
 	if ( axle.wheels.frictionScale )
 	{
 		wheelSettings->mLateralFriction.AddPoint( 1.0f, axle.wheels.frictionScale );

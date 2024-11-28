@@ -31,6 +31,7 @@ JoltPhysicsObject::JoltPhysicsObject( JPH::Body *pBody, JoltPhysicsEnvironment *
 	, m_pGameData( pParams->pGameData )
 	, m_materialIndex( Max( nMaterialIndex, 0 ) ) // Sometimes we get passed -1.
 	, m_flVolume( pParams->volume )
+	, m_pName( pParams->pName )
 {
 	// Josh:
 	// Assert that m_pGameData is the first element, some games
@@ -45,6 +46,19 @@ JoltPhysicsObject::JoltPhysicsObject( JPH::Body *pBody, JoltPhysicsEnvironment *
 		JPH::MotionProperties* pMotionProperties = m_pBody->GetMotionProperties();
 		pMotionProperties->SetLinearDamping( pParams->damping );
 		pMotionProperties->SetAngularDamping( pParams->rotdamping );
+	}
+
+	if ( !IsStatic() )
+	{
+		GetVelocity( &m_vLastVelocity, &m_vLastAngularVelocity );
+		GetPosition( &m_vLastPosition, &m_qLastOrientation );
+
+		if ( pParams->dragCoefficient != 0.0f )
+		{
+			float flDrag = pParams->dragCoefficient;
+			SetDragCoefficient( &flDrag, &flDrag );
+			EnableDrag( true );
+		}
 	}
 
 	UpdateMaterialProperties();
@@ -120,8 +134,7 @@ bool JoltPhysicsObject::IsGravityEnabled() const
 
 bool JoltPhysicsObject::IsDragEnabled() const
 {
-	Log_Stub( LOG_VJolt );
-	return false;
+	return m_bDragEnabled;
 }
 
 bool JoltPhysicsObject::IsMotionEnabled() const
@@ -161,7 +174,14 @@ void JoltPhysicsObject::EnableGravity( bool enable )
 
 void JoltPhysicsObject::EnableDrag( bool enable )
 {
+	if ( IsStatic() )
+		return;
+
+	if ( m_bDragEnabled == enable )
+		return;
+
 	Log_Stub( LOG_VJolt );
+	m_bDragEnabled = true;
 }
 
 void JoltPhysicsObject::EnableMotion( bool enable )
@@ -280,7 +300,7 @@ void JoltPhysicsObject::SetMass( float mass )
 		JPH::MassProperties massProperties = m_pBody->GetShape()->GetMassProperties();
 		massProperties.ScaleToMass( mass );
 		massProperties.mInertia( 3, 3 ) = 1.0f;
-		pMotionProperties->SetMassProperties( massProperties );
+		pMotionProperties->SetMassProperties( JPH::EAllowedDOFs::All, massProperties );
 
 		CalculateBuoyancy();
 	}
@@ -298,8 +318,13 @@ float JoltPhysicsObject::GetInvMass() const
 
 Vector JoltPhysicsObject::GetInertia() const
 {
-	Vector inv = GetInvInertia();
-	return Vector( 1.0f / inv.x, 1.0f / inv.y, 1.0f / inv.z );
+	if ( IsStatic() )
+		return Vector( 1.0f, 1.0f, 1.0f );
+
+	JPH::Vec3 joltInertiaTensor = m_pBody->GetMotionProperties()->GetInverseInertiaDiagonal().Reciprocal();
+	Vector vInertiaTensor = JoltToSource::Distance( joltInertiaTensor );
+	// For some reason, Source abs's in GetInertia/GetInvInertia. Don't ask me why.
+	return Abs( vInertiaTensor );
 }
 
 Vector JoltPhysicsObject::GetInvInertia() const
@@ -307,9 +332,9 @@ Vector JoltPhysicsObject::GetInvInertia() const
 	if ( IsStatic() )
 		return Vector( 1.0f, 1.0f, 1.0f );
 
-	//const JPH::Vec3 inertia = m_pBody->GetMotionProperties()->GetInverseInertiaDiagonal();
-	const JPH::Vec3 inertia = m_pBody->GetInverseInertia() * JPH::Vec3::sReplicate( 1.0f );
-	return Abs( JoltToSource::Unitless( inertia ) );
+	JPH::Vec3 joltInertiaTensor = m_pBody->GetMotionProperties()->GetInverseInertiaDiagonal();
+	Vector vInertiaTensor = JoltToSource::Distance( joltInertiaTensor );
+	return Abs( vInertiaTensor );
 }
 
 void JoltPhysicsObject::SetInertia( const Vector &inertia )
@@ -349,7 +374,14 @@ void JoltPhysicsObject::GetDamping( float *speed, float *rot ) const
 
 void JoltPhysicsObject::SetDragCoefficient( float *pDrag, float *pAngularDrag )
 {
-	Log_Stub( LOG_VJolt );
+	if ( pDrag )
+		m_flLinearDragCoefficient = *pDrag;
+
+	if ( pAngularDrag )
+		m_flAngularDragCoefficient = *pAngularDrag;
+
+	// Source 1 behaviour...
+	EnableDrag( m_flLinearDragCoefficient || m_flAngularDragCoefficient );
 }
 
 void JoltPhysicsObject::SetBuoyancyRatio( float ratio )
@@ -437,6 +469,12 @@ void JoltPhysicsObject::SetPosition( const Vector &worldPosition, const QAngle &
 	JPH::BodyInterface &bodyInterface = m_pPhysicsSystem->GetBodyInterfaceNoLock();
 
 	bodyInterface.SetPositionAndRotation( m_pBody->GetID(), joltPosition, joltRotation, JPH::EActivation::DontActivate );
+
+	if ( isTeleport || IsStatic() )
+	{
+		m_vLastPosition = worldPosition;
+		m_qLastOrientation = angles;
+	}
 }
 
 void JoltPhysicsObject::SetPositionMatrix( const matrix3x4_t &matrix, bool isTeleport )
@@ -544,12 +582,11 @@ void JoltPhysicsObject::GetVelocityAtPoint( const Vector &worldPosition, Vector 
 
 void JoltPhysicsObject::GetImplicitVelocity( Vector *velocity, AngularImpulse *angularVelocity ) const
 {
-	Log_Stub( LOG_VJolt );
 	if ( velocity )
-		*velocity = vec3_origin;
+		*velocity = m_vLastVelocity;
 
 	if ( angularVelocity )
-		*angularVelocity = vec3_origin;
+		*angularVelocity = m_vLastAngularVelocity;
 }
 
 void JoltPhysicsObject::LocalToWorld( Vector *worldPosition, const Vector &localPosition ) const
@@ -659,12 +696,10 @@ void JoltPhysicsObject::CalculateVelocityOffset( const Vector &forceVector, cons
 	{
 		JPH::Vec3 siPosition = SourceToJolt::Distance( worldPosition );
 
-		// TODO(Josh): Check this math.
 		JPH::Vec3 siRelativePosition = siPosition - m_pBody->GetCenterOfMassPosition();
 		JPH::Vec3 cross = siRelativePosition.Cross( siForce );
-		cross = m_pBody->GetWorldTransform().Transposed3x3() * cross;
 
-		*centerAngularVelocity = JoltToSource::AngularImpulse( cross );
+		*centerAngularVelocity = JoltToSource::AngularImpulse( m_pBody->GetInverseInertia() * cross );
 	}
 }
 
@@ -727,6 +762,7 @@ void JoltPhysicsObject::UpdateShadow( const Vector &targetPosition, const QAngle
 
 int JoltPhysicsObject::GetShadowPosition( Vector *position, QAngle *angles ) const
 {
+#if 0
 	// Josh:
 	// If func_door_rotating, func_tracktrains are moving slowly,
 	// check this function out...
@@ -759,6 +795,10 @@ int JoltPhysicsObject::GetShadowPosition( Vector *position, QAngle *angles ) con
 		*angles = JoltToSource::Angle( newQuat );
 	}
 
+	return 1;
+#endif
+
+	GetPosition( position, angles );
 	return 1;
 }
 
@@ -916,14 +956,19 @@ const CPhysCollide *JoltPhysicsObject::GetCollide() const
 
 const char *JoltPhysicsObject::GetName() const
 {
-	// Slart: Jolt used to store debug names in JPH::Body, but it was removed. So now everybody's NoName.
-	return "NoName";
+	return m_pName;
 }
 
 //-------------------------------------------------------------------------------------------------
 
 void JoltPhysicsObject::BecomeTrigger()
 {
+	if ( IsTrigger() )
+		return;
+
+	EnableDrag( false );
+	EnableGravity( false );
+
 	m_pBody->SetIsSensor( true );
 }
 
@@ -931,6 +976,8 @@ void JoltPhysicsObject::RemoveTrigger()
 {
 	if ( !IsTrigger() )
 		return;
+
+	// Note: Does not change drag/gravity state back, to mimick Source 1 behaviour.
 
 	// Josh:
 	// All this logic below is to trigger ObjectLeaveTrigger
@@ -1204,6 +1251,28 @@ void JoltPhysicsObject::RestoreObjectState( JPH::StateRecorder &recorder )
 
 //-------------------------------------------------------------------------------------------------
 
+void JoltPhysicsObject::PostSimulation( float flTimestep )
+{
+	Vector vCurrentPos, vCurrentVel;
+	AngularImpulse vAngularImpulse;
+	QAngle qCurrentOrientation;
+
+	GetPosition( &vCurrentPos, &qCurrentOrientation );
+	GetVelocity( &vCurrentVel, &vAngularImpulse );
+
+	m_vLastVelocity = ( vCurrentPos - m_vLastPosition ) / flTimestep;
+	m_vLastPosition = vCurrentPos;
+
+	Vector vGlobalAngleVelocity;
+	QAngleToAngularImpulse( ( qCurrentOrientation - m_qLastOrientation ) / flTimestep, vGlobalAngleVelocity );
+
+	m_vLastAngularVelocity = JoltToSource::Unitless( m_pBody->GetWorldTransform().Multiply3x3Transposed( SourceToJolt::Unitless( vGlobalAngleVelocity ) ) );
+
+	m_qLastOrientation = qCurrentOrientation;
+}
+
+//-------------------------------------------------------------------------------------------------
+
 void JoltPhysicsObject::UpdateMaterialProperties()
 {
 	const surfacedata_t *pSurface = JoltPhysicsSurfaceProps::GetInstance().GetSurfaceData( m_materialIndex );
@@ -1257,5 +1326,18 @@ void JoltPhysicsObject::UpdateLayer()
 	if ( !bCollisionsEnabled )
 		layer = Layers::NO_COLLIDE;
 
+	// Player Controller becomes a dummy object.
+	if ( m_callbackFlags & CALLBACK_IS_PLAYER_CONTROLLER )
+		layer = Layers::NO_COLLIDE;
+
 	bodyInterface.SetObjectLayer( m_pBody->GetID(), layer );
+}
+
+void JoltPhysicsObject::RecomputeDrag()
+{
+	if ( IsStatic() )
+		return;
+
+	Vector vDragMins, vDragMaxs;
+	JoltPhysicsCollision::GetInstance().CollideGetAABB( &vDragMins, &vDragMaxs, GetCollide(), vec3_origin, vec3_angle );
 }

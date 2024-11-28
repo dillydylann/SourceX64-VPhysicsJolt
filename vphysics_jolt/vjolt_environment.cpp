@@ -13,6 +13,7 @@
 //=================================================================================================
 
 #include "cbase.h"
+#include "coordsize.h"
 
 #include "vjolt_callstack.h"
 #include "vjolt_collide.h"
@@ -50,10 +51,14 @@ static constexpr uint kMaxBodyPairs = kMaxBodies;
 static constexpr uint kMaxContactConstraints = kMaxBodies;
 
 static ConVar vjolt_linearcast( "vjolt_linearcast", "1", FCVAR_NONE, "Whether bodies will be created with linear cast motion quality (only takes effect after map restart)." );
+static ConVar vjolt_enhanced_inactive_edge_detection( "vjolt_enhanced_inactive_edge_detection", "1", FCVAR_NONE, "Whether bodies will be created with enhanced inactive edge detection (only takes effect after map restart)." );
 static ConVar vjolt_initial_simulation( "vjolt_initial_simulation", "0", FCVAR_NONE, "Whether to pre-settle physics objects on map load." );
 
-static ConVar vjolt_substeps_collision( "vjolt_substeps_collision", "1", FCVAR_NONE, "Number of collision steps to perform.", true, 0.0f, true, 4.0f );
-static ConVar vjolt_substeps_integration( "vjolt_substeps_integration", "1", FCVAR_NONE, "Number of integration substeps to perform.", true, 0.0f, true, 4.0f );
+static ConVar vjolt_substeps( "vjolt_substeps", "1", FCVAR_NONE, "Number of substeps to perform.", true, 0.0f, true, 8.0f );
+
+static ConVar vjolt_velocity_steps( "vjolt_velocity_steps", "10", FCVAR_NONE, "Number of velocity steps to perform.", true, 0.0f, true, 64.0f );
+static ConVar vjolt_position_steps( "vjolt_position_steps", "2", FCVAR_NONE, "Number of velocity steps to perform.", true, 0.0f, true, 64.0f );
+static ConVar vjolt_deterministic( "vjolt_deterministic", "0", FCVAR_NONE, "Whether the simulation is deterministic or not." );
 
 static ConVar vjolt_baumgarte_factor( "vjolt_baumgarte_factor", "0.2", FCVAR_NONE, "Baumgarte stabilization factor (how much of the position error to 'fix' in 1 update). Changing this may help with constraint stability. Requires a map restart to change.", true, 0.0f, true, 1.0f );
 
@@ -207,12 +212,6 @@ JoltPhysicsEnvironment::JoltPhysicsEnvironment()
 		kMaxBodies, kNumBodyMutexes, kMaxBodyPairs, kMaxContactConstraints,
 		s_BroadPhaseLayerInterface, s_BroadPhaseFilter, s_LayerPairFilter);
 
-	{
-		JPH::PhysicsSettings settings = m_PhysicsSystem.GetPhysicsSettings();
-		settings.mBaumgarte = vjolt_baumgarte_factor.GetFloat();
-		m_PhysicsSystem.SetPhysicsSettings( settings );
-	}
-
 	// A body activation listener gets notified when bodies activate and go to sleep
 	// Note that this is called from a job so whatever you do here needs to be thread safe.
 	// Registering one is entirely optional.
@@ -223,21 +222,20 @@ JoltPhysicsEnvironment::JoltPhysicsEnvironment()
 	// Registering one is entirely optional.
 	m_PhysicsSystem.SetContactListener( &m_ContactListener );
 
-	// Source clamps friction from 0 -> 1, so lets do that.
 	m_PhysicsSystem.SetCombineFriction( []( const JPH::Body &inBody1, const JPH::SubShapeID &inSubShapeID1, const JPH::Body &inBody2, const JPH::SubShapeID &inSubShapeID2 ) -> float
 	{
-		return Clamp( inBody1.GetFriction() * inBody2.GetFriction(), 0.0f, 1.0f );
+		return sqrt( inBody1.GetFriction() * inBody2.GetFriction() );
 	} );
 
-	// Jolt normally does max( x, y ) for resitution, but
-	// Source's values expect them to be multiplied and clamped.
+	// Source's values expect them to be multiplied.
 	m_PhysicsSystem.SetCombineRestitution( []( const JPH::Body &inBody1, const JPH::SubShapeID& inSubShapeID1, const JPH::Body &inBody2, const JPH::SubShapeID& inSubShapeID2 ) -> float
 	{
-		return Clamp( inBody1.GetRestitution() * inBody2.GetRestitution(), 0.0f, 1.0f );
+		return inBody1.GetRestitution() * inBody2.GetRestitution();
 	} );
 
 	// Set our linear cast member
 	m_bUseLinearCast = vjolt_linearcast.GetBool();
+	m_bUseEnhancedEdgeDetection = vjolt_enhanced_inactive_edge_detection.GetBool();
 }
 
 JoltPhysicsEnvironment::~JoltPhysicsEnvironment()
@@ -339,6 +337,9 @@ IPhysicsObject *JoltPhysicsEnvironment::CreatePolyObject( const CPhysCollide *pC
 	if ( m_bUseLinearCast )
 		settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
 
+	if ( m_bUseEnhancedEdgeDetection )
+		settings.mEnhancedInternalEdgeRemoval = true;
+
 	JPH::BodyInterface &bodyInterface = m_PhysicsSystem.GetBodyInterfaceNoLock();
 	JPH::Body *pBody = bodyInterface.CreateBody( settings );
 	bodyInterface.AddBody( pBody->GetID(), JPH::EActivation::DontActivate );
@@ -351,6 +352,12 @@ IPhysicsObject *JoltPhysicsEnvironment::CreatePolyObjectStatic( const CPhysColli
 	objectparams_t params = NormalizeObjectParams( pParams );
 
 	JPH::BodyCreationSettings settings( pCollisionModel->ToShape(), SourceToJolt::Distance( position ), SourceToJolt::Angle( angles ), JPH::EMotionType::Static, Layers::NON_MOVING_WORLD );
+
+	if ( m_bUseLinearCast )
+		settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
+
+	if ( m_bUseEnhancedEdgeDetection )
+		settings.mEnhancedInternalEdgeRemoval = true;
 
 	JPH::BodyInterface &bodyInterface = m_PhysicsSystem.GetBodyInterfaceNoLock();
 	JPH::Body *pBody = bodyInterface.CreateBody( settings );
@@ -479,9 +486,9 @@ JoltPhysicsSpring::JoltPhysicsSpring( JPH::PhysicsSystem *pPhysicsSystem, JoltPh
 	settings.mMinDistance = m_OnlyStretch ? 0.0f : SourceToJolt::Distance( pParams->naturalLength );
 	settings.mMaxDistance = SourceToJolt::Distance( pParams->naturalLength );
 
-	settings.mFrequency = GetSpringFrequency( pParams->constant, m_pObjectStart, m_pObjectEnd );
-	// TODO(Josh): The damping values are normally fucking crazy like 5500 from Source... wtf is going on here.
-	settings.mDamping = 0.0f;
+	settings.mLimitsSpringSettings.mMode = JPH::ESpringMode::StiffnessAndDamping;
+	settings.mLimitsSpringSettings.mFrequency = pParams->constant;
+	settings.mLimitsSpringSettings.mDamping = pParams->damping;
 
 	m_pConstraint = static_cast< JPH::DistanceConstraint * >( settings.Create( *refBody, *attBody ) );
 	m_pConstraint->SetEnabled( true );
@@ -500,7 +507,8 @@ JoltPhysicsSpring::~JoltPhysicsSpring()
 	if ( m_pObjectEnd )
 		m_pObjectEnd->RemoveDestroyedListener( this );
 
-	m_pPhysicsSystem->RemoveConstraint( m_pConstraint );
+	if ( m_pConstraint )
+		m_pPhysicsSystem->RemoveConstraint( m_pConstraint );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -519,22 +527,33 @@ void JoltPhysicsSpring::GetEndpoints( Vector *worldPositionStart, Vector *worldP
 
 void JoltPhysicsSpring::SetSpringConstant( float flSpringConstant )
 {
+	if ( !m_pConstraint )
+		return;
+
 	m_pObjectStart->Wake();
 	m_pObjectEnd->Wake();
 
-	m_pConstraint->SetFrequency( GetSpringFrequency( flSpringConstant, m_pObjectStart, m_pObjectEnd ) );
+	JPH::SpringSettings& springSettings = m_pConstraint->GetLimitsSpringSettings();
+	springSettings.mStiffness = flSpringConstant;
 }
 
 void JoltPhysicsSpring::SetSpringDamping( float flSpringDamping )
 {
+	if ( !m_pConstraint )
+		return;
+
 	m_pObjectStart->Wake();
 	m_pObjectEnd->Wake();
 
-	//m_pConstraint->SetDamping( flSpringDamping );
+	JPH::SpringSettings& springSettings = m_pConstraint->GetLimitsSpringSettings();
+	springSettings.mDamping = flSpringDamping;
 }
 
 void JoltPhysicsSpring::SetSpringLength( float flSpringLength )
 {
+	if ( !m_pConstraint )
+		return;
+
 	m_pObjectStart->Wake();
 	m_pObjectEnd->Wake();
 
@@ -563,6 +582,11 @@ void JoltPhysicsSpring::OnJoltPhysicsObjectDestroyed( JoltPhysicsObject *pObject
 
 	if ( pObject == m_pObjectEnd )
 		m_pObjectEnd = nullptr;
+
+	// Raphael: As soon as one of the physics objects / bodies get destroyed, 
+	//          we need to remove the constraint or else it will crash on the next simulation.
+	m_pPhysicsSystem->RemoveConstraint( m_pConstraint );
+	m_pConstraint = nullptr;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -620,8 +644,9 @@ IPhysicsConstraint *JoltPhysicsEnvironment::CreateBallsocketConstraint( IPhysics
 
 IPhysicsConstraint *JoltPhysicsEnvironment::CreatePulleyConstraint( IPhysicsObject *pReferenceObject, IPhysicsObject *pAttachedObject, IPhysicsConstraintGroup *pGroup, const constraint_pulleyparams_t &pulley )
 {
-	Log_Stub( LOG_VJolt );
-	return nullptr;
+	JoltPhysicsConstraint *pConstraint = new JoltPhysicsConstraint( this, pReferenceObject, pAttachedObject );
+	pConstraint->InitialisePulley( pGroup, pulley );
+	return pConstraint;
 }
 
 IPhysicsConstraint *JoltPhysicsEnvironment::CreateLengthConstraint( IPhysicsObject *pReferenceObject, IPhysicsObject *pAttachedObject, IPhysicsConstraintGroup *pGroup, const constraint_lengthparams_t &length )
@@ -755,6 +780,15 @@ void JoltPhysicsEnvironment::Simulate( float deltaTime )
 	if ( deltaTime == 0.0f )
 		return;
 
+	{
+		JPH::PhysicsSettings settings = m_PhysicsSystem.GetPhysicsSettings();
+		settings.mBaumgarte = vjolt_baumgarte_factor.GetFloat(); // 0.2 def
+		settings.mNumVelocitySteps = vjolt_velocity_steps.GetInt();
+		settings.mNumPositionSteps = vjolt_position_steps.GetInt();
+		settings.mDeterministicSimulation = vjolt_deterministic.GetBool();
+		m_PhysicsSystem.SetPhysicsSettings( settings );
+	}
+
 	// Grab our shared assets from the interface
 	JPH::TempAllocator *tempAllocator = JoltPhysicsInterface::GetInstance().GetTempAllocator();
 	JPH::JobSystem *jobSystem = JoltPhysicsInterface::GetInstance().GetJobSystem();
@@ -764,18 +798,17 @@ void JoltPhysicsEnvironment::Simulate( float deltaTime )
 
 	HandleDebugDumpingEnvironment( VJOLT_RETURN_ADDRESS() );
 
-	m_bSimulating = true;
-
 	// Funnily enough, VPhysics calls this BEFORE
 	// doing the simulation...
 	m_ContactListener.PostSimulationFrame();
+
+	m_bSimulating = true;
 
 	// Run pre-simulation controllers
 	for ( IJoltPhysicsController *pController : m_pPhysicsControllers )
 		pController->OnPreSimulate( deltaTime );
 
-	const int nIntegrationSubSteps = vjolt_substeps_integration.GetInt();
-	const int nCollisionSubSteps = vjolt_substeps_collision.GetInt();
+	const int nCollisionSubSteps = vjolt_substeps.GetInt();
 
 	// If we haven't already, optimize the broadphase, currently this can only happen once per-environment
 	if ( !m_bOptimizedBroadPhase )
@@ -791,24 +824,32 @@ void JoltPhysicsEnvironment::Simulate( float deltaTime )
 			static constexpr int InitialSubSteps = 4;
 
 			int nIterCount = 0;
-			while ( m_PhysicsSystem.GetNumActiveBodies() && nIterCount < MaxInitialIterations )
+			while ( m_PhysicsSystem.GetNumActiveBodies( JPH::EBodyType::RigidBody ) && nIterCount < MaxInitialIterations )
 			{
-				m_PhysicsSystem.Update( InitialIterationTimescale, 1, InitialSubSteps, tempAllocator, jobSystem );
+				m_PhysicsSystem.Update( InitialIterationTimescale, InitialSubSteps, tempAllocator, jobSystem );
 				nIterCount++;
 			}
 		}
 		else
 		{
 			// Move things around!
-			m_PhysicsSystem.Update( deltaTime, nCollisionSubSteps, nIntegrationSubSteps, tempAllocator, jobSystem );
+			m_PhysicsSystem.Update( deltaTime, nCollisionSubSteps, tempAllocator, jobSystem );
 		}
 	}
 	else
 	{
 		// Move things around!
-		m_PhysicsSystem.Update( deltaTime, nCollisionSubSteps, nIntegrationSubSteps, tempAllocator, jobSystem );
+		m_PhysicsSystem.Update( deltaTime, nCollisionSubSteps, tempAllocator, jobSystem );
 	}
 	m_ContactListener.FlushCallbacks();
+
+	const JPH::BodyID *pActiveBodies = m_PhysicsSystem.GetActiveBodiesUnsafe( JPH::EBodyType::RigidBody );
+	uint32_t uActiveBodies = m_PhysicsSystem.GetNumActiveBodies( JPH::EBodyType::RigidBody );
+	for ( uint32_t i = 0; i < uActiveBodies; i++ )
+	{
+		JPH::Body* pBody = m_PhysicsSystem.GetBodyLockInterfaceNoLock().TryGetBody( pActiveBodies[i] );
+		reinterpret_cast< JoltPhysicsObject* >( pBody->GetUserData() )->PostSimulation( deltaTime );
+	}
 
 	// Run post-simulation controllers
 	for ( IJoltPhysicsController *pController : m_pPhysicsControllers )
@@ -901,7 +942,7 @@ int JoltPhysicsEnvironment::GetActiveObjectCount() const
 {
 	if ( !m_bActiveObjectCountFirst )
 	{
-		m_PhysicsSystem.GetActiveBodies( m_CachedActiveBodies );
+		m_PhysicsSystem.GetActiveBodies( JPH::EBodyType::RigidBody, m_CachedActiveBodies );
 		// Append any dirty static bodies we need the game side transforms
 		// to be updated for.
 		m_CachedActiveBodies.insert( m_CachedActiveBodies.end(), m_DirtyStaticBodies.begin(), m_DirtyStaticBodies.end() );

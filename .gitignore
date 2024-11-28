@@ -39,7 +39,10 @@ generated_code_*
 *.dll
 *.exe
 *.lib
-.vshistory/
+*.ixx.ifc.dt.module.json.command
+*.ixx.ifc.dt.module.json
+*.ixx.ifc.dt.d.json
+
 
 # Linux Stuff
 *.mak

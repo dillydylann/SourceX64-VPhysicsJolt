@@ -22,11 +22,11 @@ It is not meant to be a bash on anyone elses work however, the Bullet VPhysics p
 | Feature       | VPhysics | Volt (VPhysics Jolt) | Bullet VPhysics |
 |:--------------|:--------:|:-------------:|:---------------:|
 | Constraints (except Pulleys)                                  | ✔️ | ✔️ | ✔️ |
-| Pulleys                                                       | ✔️ | ❌ | ❌ |
+| Pulleys                                                       | ✔️ | ✔️ | ❌ |
 | Breakable constraints                                         | ✔️ | ❌ | ❌ |
 | Motors (Motion Controllers)                                   | ✔️ | ✔️ | ✔️ |
 | Motors (Constraint)                                           | ✔️ | ✔️ | ❌ |
-| Ragdolls                                                      | ✔️ | ✔️ (some bugs) | ✔️ |
+| Ragdolls                                                      | ✔️ | ✔️ | ✔️ |
 | Triggers                                                      | ✔️ | ✔️ | ❌ |
 | Object touch callbacks                                        | ✔️ | ✔️ | ❌ |
 | Prop damage/breaking                                          | ✔️ | ✔️ | ❌ |
@@ -41,7 +41,7 @@ It is not meant to be a bash on anyone elses work however, the Bullet VPhysics p
 | Crash-resistant solver                                        | ❌ | ✔️ | (no data) |
 | Supports thousands of objects without lag                     | ❌ | ✔️ | ❌ |
 | Multithreaded                                                 | ❌ | ✔️ | ✔️ (partially) |
-| Proper player controller                                      | ✔️ | ❌ (needs work!) | ✔️ (partially) |
+| Proper player controller                                      | ✔️ | ✔️ | ✔️ (partially) |
 
 ## Bugs
 
