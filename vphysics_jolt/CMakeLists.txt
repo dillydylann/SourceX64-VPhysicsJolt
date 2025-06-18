@@ -2,24 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 
 set(SRCDIR "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(CMAKE_MODULE_PATH "${SRCDIR}/cmake")
-
-function(main_project JOLT_TYPE)
-
-if(JOLT_TYPE STREQUAL "AVX2")
-	project(vphysics_jolt_avx2)
-elseif(JOLT_TYPE STREQUAL "SSE42")
-	project(vphysics_jolt_sse42)
-elseif(JOLT_TYPE STREQUAL "SSE2")
-	project(vphysics_jolt_sse2)
-else()
-	message(FATAL_ERROR "Unknown Jolt type!")
-endif()
-
-include(../joltphysics/joltphysics_settings.cmake)
+set(OUTBINNAME "vphysics")
 
 include(source_dll_base)
 
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
+add_compile_definitions(GAME_SDK2013)
 
 
 ## Source Files ##
@@ -47,6 +35,7 @@ target_sources(${PROJECT_NAME}
 	PRIVATE
 		"${SRCDIR}/public/collisionutils.cpp")
 
+
 ## Header Files ##
 
 file(GLOB SRC_HEADER_FILES "*.h")
@@ -57,30 +46,16 @@ target_sources(${PROJECT_NAME} PRIVATE ${SRC_HEADER_FILES})
 
 file(GLOB SRC_PUBLIC_HEADER_FILES "${SRCDIR}/public/vphysics/*.h")
 set(SRC_PUBLIC_HEADER_FILES ${SRC_PUBLIC_HEADER_FILES}
-    "${SRCDIR}/public/vcollide.h"
-    "${SRCDIR}/public/vcollide_parse.h"
-    "${SRCDIR}/public/vphysics_interface.h")
+	"${SRCDIR}/public/vcollide.h"
+	"${SRCDIR}/public/vcollide_parse.h"
+	"${SRCDIR}/public/vphysics_interface.h")
 source_group("Public Header Files" FILES ${SRC_PUBLIC_HEADER_FILES})
 target_sources(${PROJECT_NAME} PRIVATE ${SRC_PUBLIC_HEADER_FILES})
 
 
 ## Link Libraries ##
 
-if(JOLT_TYPE STREQUAL "AVX2")
-	target_link_libraries(${PROJECT_NAME} joltphysics_avx2)
-elseif(JOLT_TYPE STREQUAL "SSE42")
-	target_link_libraries(${PROJECT_NAME} joltphysics_sse42)
-elseif(JOLT_TYPE STREQUAL "SSE2")
-	target_link_libraries(${PROJECT_NAME} joltphysics_sse2)
-endif()
-
-target_link_libraries(${PROJECT_NAME} mathlib tier2)
+target_link_libraries(${PROJECT_NAME} mathlib tier2 Jolt)
 
 # System libs must be linked last!
 target_link_libraries(${PROJECT_NAME} ${SYSTEM_LIBS})
-
-endfunction()
-
-main_project("AVX2")
-main_project("SSE42")
-main_project("SSE2")
