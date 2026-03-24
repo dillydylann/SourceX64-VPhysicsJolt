@@ -205,15 +205,15 @@ bool JoltPhysicsPlayerController::WasFrozen()
 
 bool JoltPhysicsPlayerController::OnContactValidate( const JPH::CharacterVirtual* inCharacter, const JPH::BodyID& inBodyID2, const JPH::SubShapeID& inSubShapeID2 )
 {
-	JPH::Body *pOtherBody = m_pObject->GetEnvironment()->GetPhysicsSystem()->GetBodyLockInterfaceNoLock().TryGetBody( inBodyID2 );
+	JPH::Body *pOtherBody = m_pObject->GetJoltEnvironment()->GetPhysicsSystem()->GetBodyLockInterfaceNoLock().TryGetBody( inBodyID2 );
 	JoltPhysicsObject* pOtherObject = reinterpret_cast< JoltPhysicsObject* >( pOtherBody->GetUserData() );
-	JoltPhysicsContactListener *pListener = m_pObject->GetEnvironment()->GetContactListener();
+	JoltPhysicsContactListener *pListener = m_pObject->GetJoltEnvironment()->GetContactListener();
 	return pListener->ShouldCollide( m_pObject, pOtherObject );
 }
 
 void JoltPhysicsPlayerController::OnContactAdded( const JPH::CharacterVirtual* inCharacter, const JPH::BodyID& inBodyID2, const JPH::SubShapeID& inSubShapeID2, JPH::RVec3Arg inContactPosition, JPH::Vec3Arg inContactNormal, JPH::CharacterContactSettings& ioSettings )
 {
-	JoltPhysicsContactListener *pListener = m_pObject->GetEnvironment()->GetContactListener();
+	JoltPhysicsContactListener *pListener = m_pObject->GetJoltEnvironment()->GetContactListener();
 	( void )pListener;
 }
 
@@ -221,7 +221,10 @@ void JoltPhysicsPlayerController::OnContactAdded( const JPH::CharacterVirtual* i
 
 static void CheckCollision( JoltPhysicsObject *pObject, JPH::CollideShapeCollector &ioCollector, JPH::BodyFilter &ioFilter )
 {
-	JPH::PhysicsSystem *pSystem = pObject->GetEnvironment()->GetPhysicsSystem();
+	if ( !pObject->IsCollisionEnabled() ) 
+	    return;
+	
+	JPH::PhysicsSystem *pSystem = pObject->GetJoltEnvironment()->GetPhysicsSystem();
 
 	if ( !pObject->IsCollisionEnabled() )
 		return;
@@ -274,7 +277,7 @@ public:
 				return false;
 		}
 
-		if ( !pObject->GetEnvironment()->GetContactListener()->ShouldCollide( m_pSelfObject, pObject ) )
+		if ( !pObject->GetJoltEnvironment()->GetContactListener()->ShouldCollide( m_pSelfObject, pObject ) )
 			return false;
 
 		return true;
@@ -288,7 +291,8 @@ private:
 uint32 JoltPhysicsPlayerController::GetContactState( uint16 nGameFlags )
 {
 	// This does not seem to affect much, we should aspire to have our physics be as 1:1 to brush collisions as possible anyway
-#ifdef GAME_PORTAL2_OR_NEWER
+	// Raphael: I was getting stuck at the slightest touch with this enabled on 64x Gmod.
+#if defined( GAME_PORTAL2_OR_NEWER ) && !defined( GAME_GMOD )
 	if ( !m_pObject->IsCollisionEnabled() )
 		return 0;
 
@@ -412,6 +416,31 @@ void JoltPhysicsPlayerController::OnPreSimulate( float flDeltaTime )
 		}
 		vControllerVelocity += vGroundVelocity;
 
+		/* Way too experimental
+		if (m_pCharacter->IsSupported())
+		{
+			auto groundBodyID = m_pCharacter->GetGroundBodyID();
+			if (!groundBodyID.IsInvalid())
+			{
+				const JPH::BodyLockInterfaceNoLock &bodyLockInterface = m_pObject->GetEnvironment()->GetPhysicsSystem()->GetBodyLockInterfaceNoLock();
+				JPH::Body *body = bodyLockInterface.TryGetBody(groundBodyID);
+
+				if (body && body->IsDynamic())
+				{
+					// RaphaelIT7: We remove any velocity below this because else often you cannot jump off moving props.
+					constexpr float kVelocityEpsilon = 0.025f;
+					if (fabsf(vControllerVelocity.x) < kVelocityEpsilon)
+						vControllerVelocity.x = 0.0f;
+
+					if (fabsf(vControllerVelocity.y) < kVelocityEpsilon)
+						vControllerVelocity.y = 0.0f;
+
+					if (fabsf(vControllerVelocity.z) < kVelocityEpsilon)
+						vControllerVelocity.z = 0.0f;
+				}
+			}
+		}*/
+
 		m_pCharacter->SetLinearVelocity( SourceToJolt::Distance( vControllerVelocity ) );
 	}
 
@@ -457,19 +486,14 @@ void JoltPhysicsPlayerController::OnPostSimulate( float flDeltaTime )
 		Log_Msg( LOG_VJolt,
 			"Player State:\n"
 			"  vOldPosition: %g %g %g\n"
-			"  vOldVelocity: %g %g %g\n"
 			"  vNewPosition: %g %g %g\n"
 			"  vNewVelocity: %g %g %g\n"
-			"  m_vLastImpulse: %g %g %g\n"
-			"  vControllerVelocity: %g %g %g\n"
-			"  vGroundVelocity: %g %g %g\n",
-			vOldPosition.x, vOldPosition.x, vOldPosition.z,
-			vOldVelocity.x, vOldVelocity.x, vOldVelocity.z,
+			"  m_vLastImpulse: %g %g %g\n",
+			m_vOldPosition.x, m_vOldPosition.x, m_vOldPosition.z,
 			vNewPosition.x, vNewPosition.x, vNewPosition.z,
 			vNewVelocity.x, vNewVelocity.x, vNewVelocity.z,
-			m_vLastImpulse.x, m_vLastImpulse.x, m_vLastImpulse.z,
-			vControllerVelocity.x, vControllerVelocity.x, vControllerVelocity.z,
-			vGroundVelocity.x, vGroundVelocity.x, vGroundVelocity.z );
+			m_vLastImpulse.x, m_vLastImpulse.x, m_vLastImpulse.z
+		);
 #endif
 	}
 
@@ -533,7 +557,7 @@ void JoltPhysicsPlayerController::SetObjectInternal( JoltPhysicsObject *pObject 
 		settings->mMaxSlopeAngle               = JPH::DegreesToRadians( 45.573 );
 		settings->mEnhancedInternalEdgeRemoval = true;
 
-		m_pCharacter = new JPH::Character( settings, m_pObject->GetBody()->GetPosition(), JPH::Quat::sIdentity(), m_pObject->GetBody()->GetUserData(), m_pObject->GetEnvironment()->GetPhysicsSystem() );
+		m_pCharacter = new JPH::Character( settings, m_pObject->GetBody()->GetPosition(), JPH::Quat::sIdentity(), m_pObject->GetBody()->GetUserData(), m_pObject->GetJoltEnvironment()->GetPhysicsSystem() );
 		m_pCharacter->AddToPhysicsSystem();
 	}
 }

@@ -116,7 +116,13 @@ public:
 	void CleanupDeleteList() override;
 	void EnableDeleteQueue( bool enable ) override;
 
+#if defined( GAME_GMOD_64X )
+	void PreSave( const physprerestoreparams_t &params ) override;
+#endif
 	bool Save( const physsaveparams_t& params ) override;
+#if defined( GAME_GMOD_64X )
+	void PostSave() override;
+#endif
 	void PreRestore( const physprerestoreparams_t& params ) override;
 	bool Restore( const physrestoreparams_t& params ) override;
 	void PostRestore() override;
@@ -129,6 +135,17 @@ public:
 
 	void GetPerformanceSettings( physics_performanceparams_t* pOutput ) const override;
 	void SetPerformanceSettings( const physics_performanceparams_t* pSettings ) override;
+
+	// physics params related
+	inline float MaxVelocity() const;
+	inline float MaxAngularVelocity() const;
+	// most likely will go unused
+	inline int MaxCollisionsPerObjectPerTimestep() const;
+	inline int MaxCollisionChecksPerTimestep() const;
+	inline float LookAheadTimeObjectsVsWorld() const;
+	inline float LookAheadTimeObjectsVsObject() const;
+	inline float MinFrictionMass() const;
+	inline float MaxFrictionMass() const;
 
 	void ReadStats( physics_stats_t* pOutput ) override;
 	void ClearStats() override;
@@ -155,6 +172,10 @@ public:
 
 	void DestroyCollideOnDeadObjectFlush( CPhysCollide* ) override_portal2;
 
+#if GAME_GMOD
+	void SetGModObjectEventHandler( IGModPhysicsObjectEvent *pGModObjectEvent ) override;
+#endif
+
 public:
 	JPH::PhysicsSystem* GetPhysicsSystem() { return &m_PhysicsSystem; }
 
@@ -163,6 +184,12 @@ public:
 	JoltPhysicsContactListener* GetContactListener() { return &m_ContactListener; }
 
 	IPhysicsConstraintEvent* GetConstraintEvents() { return m_pConstraintListener; }
+
+	IPhysicsObjectEvent* GetObjectEvents() { return m_pObjectEvents; }
+
+#if GAME_GMOD
+	IGModPhysicsObjectEvent* GetGModObjectEvents() { return m_pGModObjectEvents; }
+#endif
 
 	void NotifyConstraintDisabled( JoltPhysicsConstraint* pConstraint );
 
@@ -226,6 +253,12 @@ private:
 
 	JoltPhysicsContactListener m_ContactListener;
 	IPhysicsConstraintEvent *m_pConstraintListener = nullptr;
+
+	IPhysicsObjectEvent *m_pObjectEvents = nullptr;
+
+#if GAME_GMOD
+	IGModPhysicsObjectEvent *m_pGModObjectEvents = nullptr;
+#endif
 
 	bool m_EnableConstraintNotify = false;
 

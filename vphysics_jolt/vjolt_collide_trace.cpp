@@ -507,7 +507,7 @@ static float CalculateSourceFraction( const Vector &rayDelta, float fraction, co
 //
 // Casts a box against a shape
 //
-static void CastBoxVsShape( const Ray_t &ray, uint32 contentsMask, IConvexInfo *pConvexInfo, const CPhysCollide *pCollide, const Vector &collideOrigin, const QAngle &collideAngles, trace_t *pTrace )
+static void CastBoxVsShape( const Ray_t &ray, uint32 contentsMask, IConvexInfo *pConvexInfo, const CPhysCollide *pCollide, const Vector &collideOrigin, const QAngle &collideAngles, trace_t *pTrace, bool mForceBackFace = false )
 {
 	const JPH::Shape *pShape = pCollide->ToShape();
 
@@ -526,12 +526,13 @@ static void CastBoxVsShape( const Ray_t &ray, uint32 contentsMask, IConvexInfo *
 	//settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
 	// Josh: Had to re-enable CollideWithBackFaces to allow triggers for the Portal Environment to work.
 	// Come back here if we start getting stuck on things again...
-	if ( vjolt_trace_portal_hack.GetBool() )
+	if ( mForceBackFace || vjolt_trace_portal_hack.GetBool() )
 		settings.mBackFaceModeConvex = JPH::EBackFaceMode::CollideWithBackFaces;
 	if ( vjolt_trace_castbox_backface_force.GetBool() )
 		settings.SetBackFaceMode( JPH::EBackFaceMode::CollideWithBackFaces );
 	settings.mCollisionTolerance = SourceToJolt::Distance( 0.1f * 0.25f ); // Regular VPhysics uses 0.25" here for the "collision tolerance"/epsilon, but when actually testing, it uses 0.1 * epsilon, so provide that here.
-	settings.mUseShrunkenShapeAndConvexRadius = true;
+	// RaphaelIT7: This was reported to cause possibly false collision detection, this probably is because this can result in more "rounded" shapes.
+	// settings.mUseShrunkenShapeAndConvexRadius = true;
 	settings.mReturnDeepestPoint = false;
 
 	ContentsFilter_Shape filter( pShape, contentsMask, pConvexInfo );
@@ -785,7 +786,8 @@ static void TraceBase( const Ray_t &ray, uint32 contentsMask, IConvexInfo *pConv
 		if ( isCollide )
 		{
 			// TODO(Slart): This should be CollideBoxVsShape, but I can't remember why it wasn't good enough...
-			CastBoxVsShape( ray, contentsMask, pConvexInfo, pCollide, collideOrigin, collideAngles, pTrace );
+			// RaphaelIT7: We need to use JPH::EBackFaceMode::CollideWithBackFaces because else the traces the engine uses to determent if you can unduck fail.
+			CastBoxVsShape( ray, contentsMask, pConvexInfo, pCollide, collideOrigin, collideAngles, pTrace, true );
 		}
 		else
 		{

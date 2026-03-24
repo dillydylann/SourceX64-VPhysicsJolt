@@ -28,6 +28,7 @@ target_sources(${PROJECT_NAME}
 		"vjolt_friction.cpp"
 		"vjolt_interface.cpp"
 		"vjolt_keyvalues_schema.cpp"
+		"vjolt_listener_contact.cpp"
 		"vjolt_object.cpp"
 		"vjolt_objectpairhash.cpp"
 		"vjolt_parse.cpp"

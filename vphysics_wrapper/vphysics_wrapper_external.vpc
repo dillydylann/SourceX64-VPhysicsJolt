@@ -7,6 +7,7 @@
 // Existing Source engine games don't know about Volt, so public wrapper builds
 // just output "vphysics.dll"
 
-$Macro WRAPPER_NAME		"vphysics"
+$Macro WRAPPER_NAME		"vphysics" [!$DEDICATED]
+$Macro WRAPPER_NAME		"vphysics_srv" [$DEDICATED]
 
 $Include "vphysics_wrapper_inc.vpc"

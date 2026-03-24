@@ -1,6 +1,10 @@
 
 #pragma once
 
+// RaphaelIT7: IVP reminants :/
+static constexpr int ShadowMaterialIndex = 0xF000;
+static constexpr int MaxSurfaceMaterials = 128;
+
 struct JoltSurfaceProp
 {
 	surfacedata_t data;
@@ -43,23 +47,41 @@ public:
 
 	ISaveRestoreOps		*GetMaterialIndexDataOps() const override_portal2;
 
+#if !defined( GAME_GMOD_64X )
 	// GMod-specific internal gubbins that was exposed in the public interface.
 	void				*GetIVPMaterial( int nIndex ) override_gmod;
 	int					GetIVPMaterialIndex( const void *pMaterial ) const override_gmod;
 	void				*GetIVPManager( void ) override_gmod;
 	int					RemapIVPMaterialIndex( int nIndex ) const override_gmod;
 	const char 			*GetReservedMaterialName( int nMaterialIndex ) const override_gmod;
+#else
+	const char 			*GetReservedMaterialName( int nMaterialIndex ) const; // Needed by ParseSurfaceData to setup the ShadowMaterial
+#endif
 
 public:
 	static JoltPhysicsSurfaceProps& GetInstance() { return s_PhysicsSurfaceProps; }
 
 	unsigned short		RegisterSound( const char *pName );
 
+	inline int RemapMaterialIndexForReserved( int nIndex ) const
+	{
+		if ( nIndex >= MaxSurfaceMaterials )
+			return nIndex == ShadowMaterialIndex ? m_ShadowMaterialIndex : 0;
+
+		return nIndex;
+	};
+
+	inline int GetShadowMaterialIndex() { return m_ShadowMaterialIndex; }
+
 private:
 	static JoltPhysicsSurfaceProps s_PhysicsSurfaceProps;
 
 	CUtlStringMap< JoltSurfaceProp >	m_SurfaceProps;
 	CUtlSymbolTable						m_SoundStrings;
+
+	int									m_ShadowMaterialIndex = 0;
+	bool								m_SetupShadowMaterial = false;
+	unsigned short						m_MaterialPropMap[MaxSurfaceMaterials];
 	
 	static constexpr UtlSymId_t BaseMaterialIdx = UtlSymId_t( 0 );
 

@@ -1,9 +1,31 @@
-name: Build Artifacts
+name: Build Release
 
-on: [push, pull_request, workflow_dispatch]
+on: [workflow_dispatch]
 
 jobs:
+  release_draft:
+    name: "Create Draft"
+    runs-on: ubuntu-latest
+    container: debian:bullseye
+    permissions:
+      contents: write
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: shogo82148/actions-create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.run_number }}
+          release_name: Build ${{ github.run_number }}
+          draft: true
+          prerelease: false
+          make_latest: false
+
   windows:
+    needs: release_draft
     strategy:
       fail-fast: false
       matrix:
@@ -31,7 +53,8 @@ jobs:
             vscodeArch: 'x64'
 
     runs-on: windows-2022
-
+    permissions:
+      contents: write
     steps:
     - name: Checkout Mini Source SDK
       uses: actions/checkout@v4
@@ -64,14 +87,23 @@ jobs:
         devenv jolt.sln /upgrade
         msbuild jolt.sln /nodeReuse:false /t:Rebuild /p:Configuration=Release /p:Platform=${{ matrix.vscodeArch }} /m /v:minimal
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+    - name: Create zip file
+      shell: pwsh
+      run: |
+        Compress-Archive "${{ matrix.branch }}/game/bin" "vphysics_jolt_${{ matrix.branch }}_win${{ matrix.arch }}.zip"
+
+    - name: Upload release files
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        name: vphysics_jolt_${{ matrix.branch }}_win${{ matrix.arch }}
-        path: ${{ matrix.branch }}/game
-        if-no-files-found: error
+        upload_url: ${{ needs.release_draft.outputs.upload_url }}
+        asset_path: vphysics_jolt_${{ matrix.branch }}_win${{ matrix.arch }}.zip
+        asset_name: vphysics_jolt_${{ matrix.branch }}_win${{ matrix.arch }}
+        asset_content_type: application/octet-stream
 
   linux:
+    needs: release_draft
     strategy:
       fail-fast: false
       matrix:
@@ -92,13 +124,14 @@ jobs:
 
     runs-on: ubuntu-latest
     container: debian:bullseye
-
+    permissions:
+      contents: write
     steps:
     - name: Install Dependencies
       run: |
         dpkg --add-architecture i386
         apt update
-        apt install -y build-essential git libstdc++6:i386 gcc-multilib g++-multilib
+        apt install -y build-essential git libstdc++6:i386 gcc-multilib g++-multilib zip
 
     - name: Checkout Mini Source SDK
       uses: actions/checkout@v4
@@ -126,14 +159,24 @@ jobs:
           make -f jolt.mak -j $(nproc)
         fi
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+    - name: Create zip file
+      run: |
+        cd ${{ matrix.branch }}/game
+        zip -r vphysics_jolt_${{ matrix.branch }}_linux${{ matrix.arch }}.zip bin
+        mv vphysics_jolt_${{ matrix.branch }}_linux${{ matrix.arch }}.zip ../../
+
+    - name: Upload release files
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        name: vphysics_jolt_${{ matrix.branch }}_linux${{ matrix.arch }}
-        path: ${{ matrix.branch }}/game
-        if-no-files-found: error
+        upload_url: ${{ needs.release_draft.outputs.upload_url }}
+        asset_path: vphysics_jolt_${{ matrix.branch }}_linux${{ matrix.arch }}.zip
+        asset_name: vphysics_jolt_${{ matrix.branch }}_linux${{ matrix.arch }}
+        asset_content_type: application/octet-stream
 
   linux-gmod-dedicated:
+    needs: release_draft
     runs-on: ubuntu-latest
     container: debian:bullseye
     name: "GMod Dedicated Server"
@@ -141,12 +184,14 @@ jobs:
       fail-fast: false
       matrix:
         arch: [32, 64]
+    permissions:
+      contents: write
     steps:
     - name: Install Dependencies
       run: |
         dpkg --add-architecture i386
         apt update
-        apt install -y build-essential git libstdc++6:i386 gcc-multilib g++-multilib
+        apt install -y build-essential git libstdc++6:i386 gcc-multilib g++-multilib zip
 
     - name: Checkout Mini Source SDK
       uses: actions/checkout@v4
@@ -174,9 +219,18 @@ jobs:
           make -f jolt.mak -j $(nproc)
         fi
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+    - name: Create zip file
+      run: |
+        cd gmod/game
+        zip -r vphysics_jolt_gmod_dedicated_linux${{ matrix.arch }}.zip bin
+        mv vphysics_jolt_gmod_dedicated_linux${{ matrix.arch }}.zip ../../
+
+    - name: Upload release files
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        name: vphysics_jolt_gmod_dedicated_linux${{ matrix.arch }}
-        path: gmod/game
-        if-no-files-found: error
+        upload_url: ${{ needs.release_draft.outputs.upload_url }}
+        asset_path: vphysics_jolt_gmod_dedicated_linux${{ matrix.arch }}.zip
+        asset_name: vphysics_jolt_gmod_dedicated_linux${{ matrix.arch }}
+        asset_content_type: application/octet-stream

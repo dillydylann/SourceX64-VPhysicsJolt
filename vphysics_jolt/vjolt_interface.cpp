@@ -38,6 +38,11 @@ DEFINE_LOGGING_CHANNEL_NO_TAGS( LOG_JoltInternal, "Jolt" );
 JoltPhysicsInterface JoltPhysicsInterface::s_PhysicsInterface;
 EXPOSE_SINGLE_INTERFACE_GLOBALVAR( JoltPhysicsInterface, IPhysics, VPHYSICS_INTERFACE_VERSION, JoltPhysicsInterface::GetInstance() );
 
+#if GAME_GMOD
+typedef JoltPhysicsInterface JoltPhysicsInterfaceGMod; // To avoid g_Create[...]_reg collision
+EXPOSE_SINGLE_INTERFACE_GLOBALVAR( JoltPhysicsInterfaceGMod, IPhysics, VPHYSICS_INTERFACE_VERSION_GMOD, JoltPhysicsInterface::GetInstance() );
+#endif
+
 //-------------------------------------------------------------------------------------------------
 
 // Slart:
@@ -46,6 +51,7 @@ EXPOSE_SINGLE_INTERFACE_GLOBALVAR( JoltPhysicsInterface, IPhysics, VPHYSICS_INTE
 // which use the Valve overrides in memoverride.cpp.
 // For Desolation we use mi-malloc rather than dlmalloc, that also gets built into the statically
 // linked releases for gmod (along with all of tier0 and vstdlib).
+// RaphaelIT7: It should always be kept in mind that inBlock for Free/AlignedFree can be NULL as per jolt docs! (though the engine already checks for null)
 namespace JPH {
 
 	void *Allocate( size_t inSize )
@@ -121,21 +127,33 @@ void *JoltPhysicsInterface::QueryInterface( const char *pInterfaceName )
 
 //-------------------------------------------------------------------------------------------------
 
+static std::vector<JoltPhysicsEnvironment *> g_pPhysicsEnvironments;
 IPhysicsEnvironment *JoltPhysicsInterface::CreateEnvironment()
 {
-	return new JoltPhysicsEnvironment();
+	JoltPhysicsEnvironment *pEnvironment = new JoltPhysicsEnvironment();
+	g_pPhysicsEnvironments.push_back(pEnvironment);
+	return pEnvironment;
 }
 
 void JoltPhysicsInterface::DestroyEnvironment( IPhysicsEnvironment *pEnvironment )
 {
-	delete static_cast<JoltPhysicsEnvironment *>( pEnvironment );
+	JoltPhysicsEnvironment *pJoltEnvironment = static_cast<JoltPhysicsEnvironment *>( pEnvironment );
+	
+	auto it = std::find(g_pPhysicsEnvironments.begin(), g_pPhysicsEnvironments.end(), pJoltEnvironment);
+	if (it != g_pPhysicsEnvironments.end())
+	{
+		g_pPhysicsEnvironments.erase(it);
+	}
+
+	// delete pJoltEnvironment;
 }
 
 IPhysicsEnvironment *JoltPhysicsInterface::GetActiveEnvironmentByIndex( int index )
 {
-	// Josh: Nothing uses this... ever.
-	Log_Stub( LOG_VJolt );
-	return nullptr;
+	if ( index < 0 || index >= (int)g_pPhysicsEnvironments.size() )
+		return NULL;
+
+	return g_pPhysicsEnvironments[index];
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -177,6 +195,14 @@ void JoltPhysicsInterface::DestroyAllCollisionSets()
 {
 	m_CollisionSets.clear();
 }
+
+#if GAME_GMOD
+extern bool IsValidPhyiscsObject( IPhysicsObject* pObject );
+bool JoltPhysicsInterface::IsValidPhysicsObject( IPhysicsObject* pObject )
+{
+	return ::IsValidPhyiscsObject;
+}
+#endif
 
 //-------------------------------------------------------------------------------------------------
 

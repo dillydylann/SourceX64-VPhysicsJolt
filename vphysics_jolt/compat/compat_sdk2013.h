@@ -5,6 +5,7 @@
 // Source Engine branches for SDK 2013.
 
 #include "Color.h"
+#include "branch_overrides.h"
 
 #ifndef LOGGING_H
 
@@ -48,11 +49,13 @@ static const int MAX_LOGGING_MESSAGE_LENGTH = 2048;
 #define AssertMsg_Internal( ... )
 
 // Unused, just makes stuff cleaner to not have ifdef spam.
+#if !defined( GAME_GMOD_64X )
 enum collisionhints
 {
     COLLISION_HINT_DEBRIS = 0x0001,
     COLLISION_HINT_STATICSOLID = 0x0002,
 };
+#endif
 
 class IPhysicsCollisionSet;
 class IPhysics;

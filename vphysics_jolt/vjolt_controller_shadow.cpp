@@ -1,6 +1,7 @@
 
 #include "cbase.h"
 
+#include "vjolt_surfaceprops.h"
 #include "vjolt_controller_shadow.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -95,21 +96,15 @@ void JoltPhysicsShadowController::GetLastImpulse( Vector *pOut )
 	VectorClear( *pOut );
 }
 
-// HACK HACK HACK WE MIGHT WANT TO CHANGE THIS
-// IMPLEMENT ME!
-static constexpr int ShadowMaterialIndex = 0xF000;
-
 void JoltPhysicsShadowController::UseShadowMaterial( bool bUseShadowMaterial )
 {
 	if ( !m_pObject )
 		return;
 
-#if 0
 	int current = m_pObject->GetMaterialIndex();
-	int target = bUseShadowMaterial ? ShadowMaterialIndex : m_savedMaterialIndex;
+	int target = bUseShadowMaterial ? JoltPhysicsSurfaceProps::GetInstance().GetShadowMaterialIndex() : m_savedMaterialIndex;
 	if ( target != current )
 		m_pObject->SetMaterialIndex( target );
-#endif
 }
 
 void JoltPhysicsShadowController::ObjectMaterialChanged( int materialIndex )
@@ -157,7 +152,7 @@ void JoltPhysicsShadowController::OnPreSimulate( float flDeltaTime )
 
 	VJoltAssertMsg( m_pObject->GetBody()->GetMotionType() == JPH::EMotionType::Kinematic, "Shadow controllers must be kinematic!" );
 
-	JPH::BodyInterface &bodyInterface = m_pObject->GetEnvironment()->GetPhysicsSystem()->GetBodyInterfaceNoLock();
+	JPH::BodyInterface &bodyInterface = m_pObject->GetJoltEnvironment()->GetPhysicsSystem()->GetBodyInterfaceNoLock();
 	if ( m_secondsToArrival > 0.0f )
 		bodyInterface.MoveKinematic( m_pObject->GetBodyID(), m_targetPosition, m_targetRotation, m_secondsToArrival );
 	else
