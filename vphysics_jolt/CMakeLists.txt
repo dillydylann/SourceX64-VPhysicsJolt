@@ -3,7 +3,6 @@ project(vphysics_jolt)
 
 set(SRCDIR "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(CMAKE_MODULE_PATH "${SRCDIR}/cmake")
-set(OUTBINNAME "vphysics")
 
 include(source_dll_base)
 
